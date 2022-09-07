@@ -1,6 +1,0 @@
-.idea
-.vagrant
-*.log
-dist
-
-ionscale.db*
