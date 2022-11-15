@@ -5,13 +5,16 @@ go 1.19
 require (
 	github.com/apparentlymart/go-cidr v1.1.0
 	github.com/bufbuild/connect-go v0.4.0
+	github.com/caarlos0/env/v6 v6.10.1
 	github.com/caddyserver/certmagic v0.17.1
 	github.com/coreos/go-oidc/v3 v3.3.0
 	github.com/glebarez/sqlite v1.4.6
+	github.com/go-gormigrate/gormigrate/v2 v2.0.2
 	github.com/google/uuid v1.3.0
 	github.com/hashicorp/go-bexpr v0.1.11
 	github.com/hashicorp/go-hclog v1.3.0
 	github.com/hashicorp/go-multierror v1.1.1
+	github.com/imdario/mergo v0.3.12
 	github.com/klauspost/compress v1.15.9
 	github.com/labstack/echo-contrib v0.13.0
 	github.com/labstack/echo/v4 v4.9.0
@@ -22,8 +25,10 @@ require (
 	github.com/muesli/coral v1.0.0
 	github.com/nleeper/goment v1.4.4
 	github.com/pkg/errors v0.9.1
+	github.com/prometheus/client_golang v1.13.0
 	github.com/rodaine/table v1.0.1
 	github.com/sony/sonyflake v1.1.0
+	github.com/stretchr/testify v1.8.0
 	github.com/xhit/go-str2duration/v2 v2.0.0
 	golang.org/x/crypto v0.0.0-20220829220503-c86fa9a7ed90
 	golang.org/x/net v0.0.0-20220826154423-83b083e8dc8b
@@ -42,6 +47,7 @@ require (
 	github.com/alexbrainman/sspi v0.0.0-20210105120005-909beea2cc74 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.1.2 // indirect
+	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/fatih/color v1.13.0 // indirect
 	github.com/glebarez/go-sqlite v1.18.1 // indirect
 	github.com/golang-jwt/jwt v3.2.2+incompatible // indirect
@@ -73,7 +79,7 @@ require (
 	github.com/mholt/acmez v1.0.4 // indirect
 	github.com/miekg/dns v1.1.50 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
-	github.com/prometheus/client_golang v1.13.0 // indirect
+	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.37.0 // indirect
 	github.com/prometheus/procfs v0.8.0 // indirect

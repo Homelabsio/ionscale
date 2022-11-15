@@ -20,11 +20,3 @@ func GetString(key, defaultValue string) string {
 	}
 	return defaultValue
 }
-
-func GetStrings(key string, defaultValue []string) []string {
-	v := os.Getenv(key)
-	if v != "" {
-		return strings.Split(v, ",")
-	}
-	return defaultValue
-}

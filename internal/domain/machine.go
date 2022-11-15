@@ -14,7 +14,7 @@ import (
 )
 
 type Machine struct {
-	ID                uint64 `gorm:"primary_key;autoIncrement:false"`
+	ID                uint64 `gorm:"primary_key"`
 	Name              string
 	NameIdx           uint64
 	MachineKey        string
@@ -125,6 +125,47 @@ func (IP) GormDBDataType(db *gorm.DB, field *schema.Field) string {
 }
 
 type AllowIPs []netip.Prefix
+
+type AllowIPsSet struct {
+	items map[netip.Prefix]bool
+}
+
+func NewAllowIPsSet(t AllowIPs) *AllowIPsSet {
+	s := &AllowIPsSet{}
+	return s.Add(t...)
+}
+
+func (s *AllowIPsSet) Add(t ...netip.Prefix) *AllowIPsSet {
+	if s.items == nil {
+		s.items = make(map[netip.Prefix]bool)
+	}
+
+	for _, v := range t {
+		s.items[v] = true
+	}
+
+	return s
+}
+
+func (s *AllowIPsSet) Remove(t ...netip.Prefix) *AllowIPsSet {
+	if s.items == nil {
+		return s
+	}
+
+	for _, v := range t {
+		delete(s.items, v)
+	}
+
+	return s
+}
+
+func (s *AllowIPsSet) Items() []netip.Prefix {
+	items := []netip.Prefix{}
+	for i := range s.items {
+		items = append(items, i)
+	}
+	return items
+}
 
 func (hi *AllowIPs) Scan(destination interface{}) error {
 	switch value := destination.(type) {

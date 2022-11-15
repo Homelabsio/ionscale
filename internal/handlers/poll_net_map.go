@@ -124,7 +124,10 @@ func (h *PollNetMapHandler) handleUpdate(c echo.Context, binder bind.Binder, m *
 	}
 	c.Response().Flush()
 
+	connectedDevices.WithLabelValues(m.Tailnet.Name).Inc()
+
 	defer func() {
+		connectedDevices.WithLabelValues(m.Tailnet.Name).Dec()
 		unsubscribe()
 		keepAliveTicker.Stop()
 		syncTicker.Stop()
@@ -271,7 +274,7 @@ func (h *PollNetMapHandler) createMapResponse(m *domain.Machine, binder bind.Bin
 		return nil, nil, err
 	}
 
-	rules := policies.BuildFilterRules(m, candidatePeers)
+	rules := policies.BuildFilterRules(candidatePeers, m)
 
 	controlTime := time.Now().UTC()
 	var mapResponse *tailcfg.MapResponse
@@ -287,6 +290,9 @@ func (h *PollNetMapHandler) createMapResponse(m *domain.Machine, binder bind.Bin
 			Peers:        changedPeers,
 			UserProfiles: users,
 			ControlTime:  &controlTime,
+			Debug: &tailcfg.Debug{
+				DisableLogTail: true,
+			},
 		}
 	} else {
 		mapResponse = &tailcfg.MapResponse{

@@ -4,6 +4,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
+	"github.com/hashicorp/go-multierror"
 	"gorm.io/gorm"
 	"gorm.io/gorm/schema"
 	"net/netip"
@@ -13,43 +14,16 @@ import (
 )
 
 type ACLPolicy struct {
-	Groups map[string][]string `json:"groups,omitempty"`
-	Hosts  map[string]string   `json:"hosts,omitempty"`
-	ACLs   []ACL               `json:"acls"`
+	Groups    map[string][]string `json:"groups,omitempty"`
+	Hosts     map[string]string   `json:"hosts,omitempty"`
+	ACLs      []ACL               `json:"acls"`
+	TagOwners map[string][]string `json:"tag_owners"`
 }
 
 type ACL struct {
 	Action string   `json:"action"`
 	Src    []string `json:"src"`
 	Dst    []string `json:"dst"`
-}
-
-func (i *ACLPolicy) Scan(destination interface{}) error {
-	switch value := destination.(type) {
-	case []byte:
-		return json.Unmarshal(value, i)
-	default:
-		return fmt.Errorf("unexpected data type %T", destination)
-	}
-}
-
-func (i ACLPolicy) Value() (driver.Value, error) {
-	bytes, err := json.Marshal(i)
-	return bytes, err
-}
-
-// GormDataType gorm common data type
-func (ACLPolicy) GormDataType() string {
-	return "json"
-}
-
-// GormDBDataType gorm db data type
-func (ACLPolicy) GormDBDataType(db *gorm.DB, field *schema.Field) string {
-	switch db.Dialector.Name() {
-	case "sqlite":
-		return "JSON"
-	}
-	return ""
 }
 
 func DefaultPolicy() ACLPolicy {
@@ -64,23 +38,61 @@ func DefaultPolicy() ACLPolicy {
 	}
 }
 
-type aclEngine struct {
-	policy       *ACLPolicy
-	expandedTags map[string][]string
+func (a ACLPolicy) CheckTags(tags []string) error {
+	var result *multierror.Error
+	for _, t := range tags {
+		if _, ok := a.TagOwners[t]; !ok {
+			result = multierror.Append(result, fmt.Errorf("tag [%s] is invalid or not permitted", t))
+		}
+	}
+	return result.ErrorOrNil()
 }
 
-func (p ACLPolicy) IsValidPeer(src *Machine, dest *Machine) bool {
-	f := &aclEngine{policy: &p}
-	return f.isValidPeer(src, dest)
+func (a ACLPolicy) CheckTagOwners(tags []string, p *User) error {
+	var result *multierror.Error
+	for _, t := range tags {
+		if ok := a.IsTagOwner(t, p); !ok {
+			result = multierror.Append(result, fmt.Errorf("tag [%s] is invalid or not permitted", t))
+		}
+	}
+	return result.ErrorOrNil()
 }
 
-func (p ACLPolicy) BuildFilterRules(dst *Machine, peers []Machine) []tailcfg.FilterRule {
-	f := &aclEngine{policy: &p}
-	return f.build(dst, peers)
+func (a ACLPolicy) IsTagOwner(tag string, p *User) bool {
+	if p.UserType == UserTypeService {
+		return true
+	}
+	if tagOwners, ok := a.TagOwners[tag]; ok {
+		return a.validateTagOwners(tagOwners, p)
+	}
+	return false
 }
 
-func (a *aclEngine) isValidPeer(src *Machine, dest *Machine) bool {
-	for _, acl := range a.policy.ACLs {
+func (a ACLPolicy) validateTagOwners(tagOwners []string, p *User) bool {
+	for _, alias := range tagOwners {
+		if strings.HasPrefix(alias, "group:") {
+			if group, ok := a.Groups[alias]; ok {
+				for _, groupMember := range group {
+					if groupMember == p.Name {
+						return true
+					}
+				}
+			}
+		} else {
+			if alias == p.Name {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (a ACLPolicy) IsValidPeer(src *Machine, dest *Machine) bool {
+	if !src.HasTags() && !dest.HasTags() && dest.HasUser(src.User.Name) {
+		return true
+	}
+
+	for _, acl := range a.ACLs {
 		allDestPorts := a.expandMachineToDstPorts(dest, acl.Dst)
 		if len(allDestPorts) == 0 {
 			continue
@@ -95,19 +107,19 @@ func (a *aclEngine) isValidPeer(src *Machine, dest *Machine) bool {
 	return false
 }
 
-func (a *aclEngine) build(dst *Machine, peers []Machine) []tailcfg.FilterRule {
+func (a ACLPolicy) BuildFilterRules(srcs []Machine, dst *Machine) []tailcfg.FilterRule {
 	var rules []tailcfg.FilterRule
 
-	for _, acl := range a.policy.ACLs {
+	for _, acl := range a.ACLs {
 		allDestPorts := a.expandMachineToDstPorts(dst, acl.Dst)
 		if len(allDestPorts) == 0 {
 			continue
 		}
 
 		var allSrcIPsSet = &StringSet{}
-		for _, src := range acl.Src {
-			for _, peer := range peers {
-				srcIPs := a.expandMachineAlias(&peer, src, true)
+		for _, alias := range acl.Src {
+			for _, src := range srcs {
+				srcIPs := a.expandMachineAlias(&src, alias, true)
 				allSrcIPsSet.Add(srcIPs...)
 			}
 		}
@@ -133,7 +145,7 @@ func (a *aclEngine) build(dst *Machine, peers []Machine) []tailcfg.FilterRule {
 	return rules
 }
 
-func (a *aclEngine) expandMachineToDstPorts(m *Machine, ports []string) []tailcfg.NetPortRange {
+func (a ACLPolicy) expandMachineToDstPorts(m *Machine, ports []string) []tailcfg.NetPortRange {
 	allDestRanges := []tailcfg.NetPortRange{}
 	for _, d := range ports {
 		ranges := a.expandMachineDestToNetPortRanges(m, d)
@@ -142,7 +154,7 @@ func (a *aclEngine) expandMachineToDstPorts(m *Machine, ports []string) []tailcf
 	return allDestRanges
 }
 
-func (a *aclEngine) expandMachineDestToNetPortRanges(m *Machine, dest string) []tailcfg.NetPortRange {
+func (a ACLPolicy) expandMachineDestToNetPortRanges(m *Machine, dest string) []tailcfg.NetPortRange {
 	tokens := strings.Split(dest, ":")
 	if len(tokens) < 2 || len(tokens) > 3 {
 		return nil
@@ -179,7 +191,7 @@ func (a *aclEngine) expandMachineDestToNetPortRanges(m *Machine, dest string) []
 	return dests
 }
 
-func (a *aclEngine) expandMachineAlias(m *Machine, alias string, src bool) []string {
+func (a ACLPolicy) expandMachineAlias(m *Machine, alias string, src bool) []string {
 	if alias == "*" {
 		if alias == "*" {
 			return []string{"*"}
@@ -191,7 +203,7 @@ func (a *aclEngine) expandMachineAlias(m *Machine, alias string, src bool) []str
 	}
 
 	if strings.HasPrefix(alias, "group:") && !m.HasTags() {
-		users, ok := a.policy.Groups[alias]
+		users, ok := a.Groups[alias]
 
 		if !ok {
 			return []string{}
@@ -206,11 +218,11 @@ func (a *aclEngine) expandMachineAlias(m *Machine, alias string, src bool) []str
 		return []string{}
 	}
 
-	if strings.HasPrefix(alias, "tag:") && m.HasTag(alias[4:]) {
+	if strings.HasPrefix(alias, "tag:") && m.HasTag(alias) {
 		return []string{m.IPv4.String(), m.IPv6.String()}
 	}
 
-	if h, ok := a.policy.Hosts[alias]; ok {
+	if h, ok := a.Hosts[alias]; ok {
 		alias = h
 	}
 
@@ -234,7 +246,7 @@ func (a *aclEngine) expandMachineAlias(m *Machine, alias string, src bool) []str
 	return []string{}
 }
 
-func (a *aclEngine) expandValuePortToPortRange(s string) ([]tailcfg.PortRange, error) {
+func (a ACLPolicy) expandValuePortToPortRange(s string) ([]tailcfg.PortRange, error) {
 	if s == "*" {
 		return []tailcfg.PortRange{{First: 0, Last: 65535}}, nil
 	}
@@ -269,6 +281,34 @@ func (a *aclEngine) expandValuePortToPortRange(s string) ([]tailcfg.PortRange, e
 		}
 	}
 	return ports, nil
+}
+
+func (i *ACLPolicy) Scan(destination interface{}) error {
+	switch value := destination.(type) {
+	case []byte:
+		return json.Unmarshal(value, i)
+	default:
+		return fmt.Errorf("unexpected data type %T", destination)
+	}
+}
+
+func (i ACLPolicy) Value() (driver.Value, error) {
+	bytes, err := json.Marshal(i)
+	return bytes, err
+}
+
+// GormDataType gorm common data type
+func (ACLPolicy) GormDataType() string {
+	return "json"
+}
+
+// GormDBDataType gorm db data type
+func (ACLPolicy) GormDBDataType(db *gorm.DB, field *schema.Field) string {
+	switch db.Dialector.Name() {
+	case "sqlite":
+		return "JSON"
+	}
+	return ""
 }
 
 type StringSet struct {
